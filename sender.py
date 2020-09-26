@@ -54,19 +54,21 @@ def send_gbn(sock):
 def receive_snw(sock, pkt):
     # Fill here to handle acks
     timer = Timer(TIMEOUT_INTERVAL)
-    timer.start() # UDP Packets should be non-blocking
+    timer.start()
     while not timer.timeout():
-        try:
-            _pkt, recvaddr = sock.recvfrom(1024, MSG_DONTWAIT)
-            seq, data = packet.extract(_pkt)
-            if seq and data:
-                return # Receiver should only be sending ACK
+        try: # _pkt is ACK packet received
+            _pkt, recvaddr = sock.recvfrom(1024, MSG_DONTWAIT) # Sockets block by default ):
+            return # Receive should only be sending ACK, not checking on ACK validity
+            #seq, data = packet.extract(_pkt)
+            #if data.decode == ACK:
+            #    return
             else:
-                udt.send(pkt, sock, RECEIVER_ADDR)
-                timer.stop()
-                timer.start()
         except BlockingIOError:
             continue
+    udt.send(pkt, sock, RECEIVER_ADDR)
+    timer.stop()
+    timer.start()
+
 
 # Receive thread for GBN
 def receive_gbn(sock):
