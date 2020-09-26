@@ -56,9 +56,9 @@ def receive_snw(sock, pkt):
     timer = Timer(TIMEOUT_INTERVAL)
     timer.start() # UDP Packets should be non-blocking
     while not timer.timeout():
-        _pkt, recvaddr = udt.recv(sock)
+        _pkt, recvaddr = sock.recvfrom(1024, MSG_DONTWAIT)
         seq, data = packet.extract(_pkt)
-        if data:
+        if seq and data:
             return # Receiver should only be sending ACK
         else:
             udt.send(pkt, sock, RECEIVER_ADDR)
