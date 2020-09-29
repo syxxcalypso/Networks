@@ -52,19 +52,20 @@ def send_gbn(sock):
 
 # Receive thread for stop-n-wait
 def receive_snw(sock, pkt):
-    # Fill here to handle acks
     with mutex:
         timer.stop()
         timer.start()
-        while True and not timer.timeout():
-            try: # _pkt is ACK packet received
-                _pkt, recvaddr = udt.recv(sock) # Receiver only sends ACK
-                return
-            except BlockingIOError:
-                continue
-        udt.send(pkt, sock, RECEIVER_ADDR)
-        timer.stop()
-        timer.start()
+        while True:
+            if timer.running():
+                try: # _pkt is ACK packet received
+                    _pkt, recvaddr = udt.recv(sock) # Receiver only sends ACK
+                    timer.stop()
+                    return
+                except BlockingIOError:
+                    continue
+            udt.send(pkt, sock, RECEIVER_ADDR)
+            timer.stop()
+            timer.start()
 
 
 # Receive thread for GBN
@@ -80,6 +81,7 @@ if __name__ == '__main__':
     #     exit()
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.setblocking(0)
     sock.bind(SENDER_ADDR)
 
     # filename = sys.argv[1]
