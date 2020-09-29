@@ -1,6 +1,6 @@
 import socket
 import sys
-# import _thread
+import _thread
 import time
 import string
 import packet
@@ -18,8 +18,8 @@ WINDOW_SIZE = 4
 
 # You can use some shared resources over the two threads
 # base = 0
-# mutex = _thread.allocate_lock()
-# timer = Timer(TIMEOUT_INTERVAL)
+mutex = _thread.allocate_lock()
+timer = Timer(TIMEOUT_INTERVAL)
 
 # Need to have two threads: one for sending and another for receiving ACKs
 
@@ -53,21 +53,18 @@ def send_gbn(sock):
 # Receive thread for stop-n-wait
 def receive_snw(sock, pkt):
     # Fill here to handle acks
-    timer = Timer(TIMEOUT_INTERVAL)
-    timer.start()
-    while not timer.timeout():
-        try: # _pkt is ACK packet received
-            _pkt, recvaddr = sock.recvfrom(1024, MSG_DONTWAIT) # Sockets block by default ):
-            return # Receive should only be sending ACK, not checking on ACK validity
-            #seq, data = packet.extract(_pkt)
-            #if data.decode == ACK:
-            #    return
-            else:
-        except BlockingIOError:
-            continue
-    udt.send(pkt, sock, RECEIVER_ADDR)
-    timer.stop()
-    timer.start()
+    with mutex:
+        timer.stop()
+        timer.start()
+        while True and not timer.timeout():
+            try: # _pkt is ACK packet received
+                _pkt, recvaddr = udt.recv(sock) # Receiver only sends ACK
+                return
+            except BlockingIOError:
+                continue
+        udt.send(pkt, sock, RECEIVER_ADDR)
+        timer.stop()
+        timer.start()
 
 
 # Receive thread for GBN
