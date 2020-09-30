@@ -18,9 +18,13 @@ WINDOW_SIZE = 4
 
 # You can use some shared resources over the two threads
 base = 0
-window = [packet.make(-1, "END".encode())]
+window = []
 mutex = _thread.allocate_lock()
 timer = Timer(TIMEOUT_INTERVAL)
+
+# Relay control
+threads = 0
+sync = False
 
 # Need to have two threads: one for sending and another for receiving ACKs
 
@@ -34,24 +38,24 @@ def generate_payload(length=10):
 
 # Send using Stop_n_wait protocol
 def send_snw(sock):
-    global base
-    base += 1
+    global threads, sync
+    threads += 1
     seq = 0
     with open(filename, "r") as f:                    # Open fd
         data = True                                       # do-while trick
         while data:                                       # Data still in stream
-            mutex.acquire()                                   # Block
-            print(1)
-            data = f.read(PACKET_SIZE).encode()             # Read stream
-            pkt = packet.make(seq, data)     # Fill window buffer
-            window.append(pkt)
-            udt.send(pkt, sock, RECEIVER_ADDR) # Send
-            seq += 1                                  # Next
-            mutex.release()
+            with mutex:
+                sync = True
+                print("1 - Acquired w/ {seq+1}")
+                data = f.read(PACKET_SIZE).encode()             # Read stream
+                pkt = packet.make(seq, data)     # Fill window buffer
+                window.append(pkt)
+                udt.send(pkt, sock, RECEIVER_ADDR) # Send
+                seq += 1                                  # Next
             time.sleep(SLEEP_INTERVAL)              # Give time before ACK check
         pkt = packet.make(seq, "END".encode())            # Prepare last packet
         udt.send(pkt, sock, RECEIVER_ADDR)                # Send EOF
-    base -= 1
+    threads -= 1
 
 # Send using GBN protocol
 def send_gbn(sock):
@@ -60,23 +64,28 @@ def send_gbn(sock):
 
 # Receive thread for stop-n-wait
 def receive_snw(sock, pkt):
-    global base
-    base += 1
+    global threads, sync
+    threads += 1
+    while not sync:
+        continue
     while window:                 # Check packet buffer
         mutex.acquire()
-        print(2)
+        print("2 - Acquired")
         timer.start()         # Countdown
         p = pkt.pop()         # Pull from buffer
         while True:           # Until ACK
             try:
+                #sock.setblocking(True)
                 ack, recvaddr = udt.recv(sock) # Check ACK
+                timer.stop()
+                mutex.release()
+                time.sleep(1)
                 break
             except BlockingIOError:                    # No ACK
                 if timer.timeout():                    # Check timer
                     udt.send(p, sock, RECEIVER_ADDR)   # Resend
                     timer.start()                          # Reset
-        mutex.release()
-    base -= 1
+    threads -= 1
    
 
 
@@ -108,7 +117,7 @@ if __name__ == '__main__':
     time.sleep(1)
     _thread.start_new_thread(receive_snw, (sock, window))
 
-    while base:
+    while threads:
         continue
 
     print("post")
