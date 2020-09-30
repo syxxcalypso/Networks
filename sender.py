@@ -86,7 +86,8 @@ if __name__ == '__main__':
     sock.bind(SENDER_ADDR)
 
     filename = sys.argv[1]
-    _thread.start_new_thread(send_)
+    _thread.start_new_thread(send_snw, (sock))
+    _thread.start_new_thread(receive_snw, (sock, window))
 
     sock.close()
 
