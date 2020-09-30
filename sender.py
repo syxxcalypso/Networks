@@ -12,7 +12,7 @@ from timer import Timer
 PACKET_SIZE = 512
 RECEIVER_ADDR = ('localhost', 8080)
 SENDER_ADDR = ('localhost', 9090)
-SLEEP_INTERVAL = 0.05 # (In seconds)
+SLEEP_INTERVAL = 1.0 # (In seconds)
 TIMEOUT_INTERVAL = 0.5
 WINDOW_SIZE = 4
 
@@ -34,18 +34,24 @@ def generate_payload(length=10):
 
 # Send using Stop_n_wait protocol
 def send_snw(sock):
+    global base
+    base += 1
     seq = 0
-    with open(filename, "rb") as file:                    # Open fd
+    with open(filename, "r") as f:                    # Open fd
         data = True                                       # do-while trick
         while data:                                       # Data still in stream
-            with mutex:                                   # Block
-                data = file.read(PACKET_SIZE)             # Read stream
-                window.append(packet.make(seq, data))     # Fill window buffer
-                udt.send(window[-1], sock, RECEIVER_ADDR) # Send
-                seq += 1                                  # Next
-                time.sleep(TIMEOUT_INTERVAL)              # Give time before ACK check
+            mutex.acquire()                                   # Block
+            print(1)
+            data = f.read(PACKET_SIZE).encode()             # Read stream
+            pkt = packet.make(seq, data)     # Fill window buffer
+            window.append(pkt)
+            udt.send(pkt, sock, RECEIVER_ADDR) # Send
+            seq += 1                                  # Next
+            mutex.release()
+            time.sleep(SLEEP_INTERVAL)              # Give time before ACK check
         pkt = packet.make(seq, "END".encode())            # Prepare last packet
         udt.send(pkt, sock, RECEIVER_ADDR)                # Send EOF
+    base -= 1
 
 # Send using GBN protocol
 def send_gbn(sock):
@@ -54,18 +60,23 @@ def send_gbn(sock):
 
 # Receive thread for stop-n-wait
 def receive_snw(sock, pkt):
+    global base
+    base += 1
     while window:                 # Check packet buffer
-        with mutex:               # Block
-            timer.start()         # Countdown
-            p = pkt.pop()         # Pull from buffer
-            while True:           # Until ACK
-                try:
-                    ack, recvaddr = udt.recv(sock) # Check ACK
-                    break
-                except BlockingIOError:                    # No ACK
-                    if timer.timeout():                    # Check timer
-                        udt.send(p, sock, RECEIVER_ADDR)   # Resend
-                        t.start()                          # Reset
+        mutex.acquire()
+        print(2)
+        timer.start()         # Countdown
+        p = pkt.pop()         # Pull from buffer
+        while True:           # Until ACK
+            try:
+                ack, recvaddr = udt.recv(sock) # Check ACK
+                break
+            except BlockingIOError:                    # No ACK
+                if timer.timeout():                    # Check timer
+                    udt.send(p, sock, RECEIVER_ADDR)   # Resend
+                    timer.start()                          # Reset
+        mutex.release()
+    base -= 1
    
 
 
@@ -77,18 +88,30 @@ def receive_gbn(sock):
 
 # Main function
 if __name__ == '__main__':
-    if len(sys.argv) != 2:
-        print('Expected filename as command line argument')
-        exit()
+    #if len(sys.argv) != 2:
+    #    print('Expected filename as command line argument')
+    #    exit()
+
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setblocking(0)
     sock.bind(SENDER_ADDR)
 
-    filename = sys.argv[1]
-    _thread.start_new_thread(send_snw, (sock))
+    #filename = sys.argv[1]
+    filename = "/home/shor/meta"
+
+    print("pre")
+
+    base = 0
+
+    _thread.start_new_thread(send_snw, (sock,))
+    time.sleep(1)
     _thread.start_new_thread(receive_snw, (sock, window))
 
+    while base:
+        continue
+
+    print("post")
     sock.close()
 
 
