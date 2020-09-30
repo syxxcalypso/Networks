@@ -17,7 +17,8 @@ TIMEOUT_INTERVAL = 0.5
 WINDOW_SIZE = 4
 
 # You can use some shared resources over the two threads
-# base = 0
+base = 0
+window = [packet.make(-1, "END".encode())]
 mutex = _thread.allocate_lock()
 timer = Timer(TIMEOUT_INTERVAL)
 
@@ -33,17 +34,18 @@ def generate_payload(length=10):
 
 # Send using Stop_n_wait protocol
 def send_snw(sock):
-    # Fill out the code here
     seq = 0
-    while(seq < 20):
-        data = generate_payload(40).encode()
-        pkt = packet.make(seq, data)
-        print("Sending seq# ", seq, "\n")
-        udt.send(pkt, sock, RECEIVER_ADDR)
-        seq = seq+1
-        time.sleep(TIMEOUT_INTERVAL)
-    pkt = packet.make(seq, "END".encode())
-    udt.send(pkt, sock, RECEIVER_ADDR)
+    with open(filename, "rb") as file:                    # Open fd
+        data = True                                       # do-while trick
+        while data:                                       # Data still in stream
+            with mutex:                                   # Block
+                data = file.read(PACKET_SIZE)             # Read stream
+                window.append(packet.make(seq, data))     # Fill window buffer
+                udt.send(window[-1], sock, RECEIVER_ADDR) # Send
+                seq += 1                                  # Next
+                time.sleep(TIMEOUT_INTERVAL)              # Give time before ACK check
+        pkt = packet.make(seq, "END".encode())            # Prepare last packet
+        udt.send(pkt, sock, RECEIVER_ADDR)                # Send EOF
 
 # Send using GBN protocol
 def send_gbn(sock):
@@ -52,20 +54,19 @@ def send_gbn(sock):
 
 # Receive thread for stop-n-wait
 def receive_snw(sock, pkt):
-    with mutex:
-        timer.stop()
-        timer.start()
-        while True:
-            if timer.running():
-                try: # _pkt is ACK packet received
-                    _pkt, recvaddr = udt.recv(sock) # Receiver only sends ACK
-                    timer.stop()
-                    return
-                except BlockingIOError:
-                    continue
-            udt.send(pkt, sock, RECEIVER_ADDR)
-            timer.stop()
-            timer.start()
+    while window:                 # Check packet buffer
+        with mutex:               # Block
+            timer.start()         # Countdown
+            p = pkt.pop()         # Pull from buffer
+            while True:           # Until ACK
+                try:
+                    ack, recvaddr = udt.recv(sock) # Check ACK
+                    break
+                except BlockingIOError:                    # No ACK
+                    if timer.timeout():                    # Check timer
+                        udt.send(p, sock, RECEIVER_ADDR)   # Resend
+                        t.start()                          # Reset
+   
 
 
 # Receive thread for GBN
@@ -76,17 +77,17 @@ def receive_gbn(sock):
 
 # Main function
 if __name__ == '__main__':
-    # if len(sys.argv) != 2:
-    #     print('Expected filename as command line argument')
-    #     exit()
+    if len(sys.argv) != 2:
+        print('Expected filename as command line argument')
+        exit()
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setblocking(0)
     sock.bind(SENDER_ADDR)
 
-    # filename = sys.argv[1]
+    filename = sys.argv[1]
+    _thread.start_new_thread(send_)
 
-    send_snw(sock)
     sock.close()
 
 
