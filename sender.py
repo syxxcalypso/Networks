@@ -24,9 +24,8 @@ mutex = _thread.allocate_lock()
 timer = Timer(TIMEOUT_INTERVAL)
 
 # RELAY CONTROL
-threads = 0
 sync = False
-
+alive = True
 
 # Generate random payload of any length
 def generate_payload(length=10):
@@ -40,10 +39,7 @@ def generate_payload(length=10):
 def send_snw(sock):
 
     # Access to shared resources
-    global threads, sync
-
-    # Put name in hat
-    threads += 1
+    global sync
 
     # Track packet count
     seq = 0
@@ -84,9 +80,6 @@ def send_snw(sock):
             pkt_buffer.append(pkt)
             udt.send(pkt, sock, RECEIVER_ADDR)                # Send EOF
 
-    # Remove name from hat
-    threads -= 1
-
 # Send using GBN protocol
 def send_gbn(sock):
 
@@ -96,10 +89,7 @@ def send_gbn(sock):
 def receive_snw(sock, pkt):
 
     # Shared Resource Access
-    global threads, sync
-
-    # Put Name in Hat
-    threads += 1
+    global sync, alive
 
     # Spin lock to synchronize execution
     while not sync:
@@ -141,9 +131,12 @@ def receive_snw(sock, pkt):
                     retry -= 1
                     udt.send(p, sock, RECEIVER_ADDR)
                     timer.start()
+
     # Remove name from hat
-    threads -= 1
-   
+    alive = False
+
+    # Mutex is held on purpose to ensure
+    # Data misordering at fail doesn't occur
 
 
 # Receive thread for GBN
@@ -174,7 +167,7 @@ if __name__ == '__main__':
     time.sleep(1)
     _thread.start_new_thread(receive_snw, (sock, pkt_buffer))
 
-    while threads:
+    while alive:
         continue
 
     print("post")
