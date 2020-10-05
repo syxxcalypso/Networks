@@ -12,13 +12,14 @@ from timer import Timer
 PACKET_SIZE = 512
 RECEIVER_ADDR = ('localhost', 8080)
 SENDER_ADDR = ('localhost', 9090)
-SLEEP_INTERVAL = 2.0 # (In seconds)
+SLEEP_INTERVAL = 1.0 # (In seconds)
 TIMEOUT_INTERVAL = 1.0
 WINDOW_SIZE = 4
-RETRY_ATTEMPTS = 20
+RETRY_ATTEMPTS = 8
 
 # SHARED RESOURCES
 base = 0
+data = True
 pkt_buffer = []
 mutex = _thread.allocate_lock()
 timer = Timer(TIMEOUT_INTERVAL)
