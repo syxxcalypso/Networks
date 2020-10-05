@@ -8,7 +8,46 @@ RECEIVER_ADDR = ('localhost', 8080)
 
 # Receive packets from the sender w/ GBN protocol
 def receive_gbn(sock):
-    # Fill here
+
+    # Terminal String
+    endStr = ''
+
+    # Most recent sequence number
+    _seq = -1
+
+    # Blocking Loop
+    while True:
+
+        # Block on socket data
+        pkt, senderaddr = udt.recv(sock)
+        seq, data = packet.extract(pkt)
+
+        sys.stderr.write("Received Seq: {}\n".format(seq))
+        sys.stderr.flush()
+
+        # If data is newer by exactly 1 in-order segment
+        if seq == _seq + 1:
+
+            # Update last sequence
+            _seq = seq
+
+            # Parse data and write debugging info to logging stream
+            endStr = data.decode()
+            sys.stderr.write("From: {}, Seq# {}\n".format(senderaddr, seq))
+            sys.stderr.flush()
+
+            # If string is terminal
+            if endStr == 'END':
+                return
+
+            # Write socket data to output stream
+            sys.stdout.write(endStr)
+            sys.stdout.flush()
+
+        # Send null ACK
+        ack = packet.make(seq, b' ')
+        udt.send(ack, sock, ('localhost', 9090))
+
     return
 
 
@@ -67,7 +106,7 @@ if __name__ == '__main__':
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.bind(RECEIVER_ADDR)
     # filename = sys.argv[1]
-    receive_snw(sock)
+    receive_gbn(sock)
 
     # Close the socket
     sock.close()
