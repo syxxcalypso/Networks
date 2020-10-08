@@ -264,6 +264,8 @@ def receive_gbn(sock):
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Receive UDP packets.')
+    parser.add_argument('path', metavar='<input file path>', type=str,
+                        help='Phrase length(s)')
     parser.add_argument('method', metavar='<protocol>', type=str,
                         help='Phrase length(s)')
     return parser.parse_args()
@@ -276,9 +278,6 @@ if __name__ == '__main__':
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setblocking(0)
     sock.bind(SENDER_ADDR)
-
-    filename = sys.argv[1]
-    #filename = "/home/shor/meta"
 
     print("pre")
 
@@ -295,6 +294,8 @@ if __name__ == '__main__':
     else:
         sys.stderr.write("Protocol selection must be one of [\'snw\', \'gbn\']\n")
         sys.stderr.flush()
+
+    filename = args.path
 
     # problem with alive and sync on recv
     while alive:
