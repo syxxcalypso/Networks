@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import socket
 import sys
 import _thread
@@ -6,6 +7,7 @@ import string
 import packet
 import udt
 import random
+import argparse
 from timer import Timer
 
 # SETTINGS
@@ -15,7 +17,7 @@ SENDER_ADDR = ('localhost', 9090)
 SLEEP_INTERVAL = 1.0 # (In seconds)
 TIMEOUT_INTERVAL = 1.0
 WINDOW_SIZE = 4
-RETRY_ATTEMPTS = 8
+RETRY_ATTEMPTS = 24
 
 # SHARED RESOURCES
 base = 0
@@ -86,56 +88,60 @@ def send_gbn(sock):
     # Track packet count
     seq = 0
 
+    # Set data proper
+    data = []
+
     # Open local stream
     with open(filename, "r") as f:
 
+        print("[I] SEND - Initial Stream")
+
+        for i in range(WINDOW_SIZE):
+            data = f.read(PACKET_SIZE).encode()
+            if data:
+                print("[I] SEND - Pushing to Buffer Pkt# {}".format(seq))
+                pkt = packet.make(seq, data)
+                pkt_buffer.append((pkt, seq))
+                seq += 1
+
+
+        _base = 0
+
         # Sequential File Access
-        while data:
-
-            # Lock Context
-            with mutex:
-
-                # Debugging Info
-                print("[I] SEND - Acquired Lock")
-
-                if type(data) is bool:
-                    print("[I] SEND - Data Size: Boolean")
-                else:
-                    print("[I] SEND - Data Size: {}".format(len(data)))
-                    if len(data) == 1:
-                        print(data)
+        while data or pkt_buffer:
 
 
+            # Bound by window
+            while pkt_buffer:
+                # Delay Mutex for sister thread
+                time.sleep(SLEEP_INTERVAL)
 
-                # Bound by window
-                while data and seq < WINDOW_SIZE:
+                with mutex:
 
-                    # Generate Packet & Link Buffer
-                    data = f.read(PACKET_SIZE).encode()
-                    pkt = packet.make(seq, data)
-
-                    # Use buffer like a queue
-                    pkt_buffer.append(pkt)
-
-                    # Handle Thread Timing
                     sync = True
 
-                    # Send Packet and Increment Sequence
-                    print("[I] SEND - Sending Pkt# {}".format(seq))
-                    udt.send(pkt, sock, RECEIVER_ADDR)
+                    print("\n[I] SEND - Acquired Lock")
+                    for pkt in pkt_buffer:
+                        print("[I] SEND - Sending Pkt# {}".format(pkt[1]))
+                        udt.send(pkt[0], sock, RECEIVER_ADDR)
+
+
+            for i in range(base - _base):
+                data = f.read(PACKET_SIZE).encode()
+                if data:
+                    pkt = packet.make(seq, data_)
+                    pkt_buffer.append((pkt, seq))
                     seq += 1
+            _base = base
 
-                # Reset sequence counter
-                # seq = 0
+    # Prepare & Send END packet
+    with mutex:
+        pkt = packet.make(seq, "END".encode())            # Prepare last packet
+        pkt_buffer.append(pkt)
+        udt.send(pkt, sock, RECEIVER_ADDR)                # Send EOF
 
-            # Delay Mutex for sister thread
-            time.sleep(SLEEP_INTERVAL)
-
-        # Prepare & Send END packet
-        with mutex:
-            pkt = packet.make(seq, "END".encode())            # Prepare last packet
-            pkt_buffer.append(pkt)
-            udt.send(pkt, sock, RECEIVER_ADDR)                # Send EOF
+    print("[I] SEND - Terminating Thread, Buffer Size: {}".format(len(pkt_buffer)))
+    alive = False
     return
 
 # Receive thread for stop-n-wait
@@ -202,32 +208,26 @@ def receive_gbn(sock):
     while not sync:
         continue
 
-    #import pdb
-    #pdb.set_trace()
-
     retry = RETRY_ATTEMPTS
 
-    # While Packets still exist
-    while pkt_buffer and retry:
+    base = 0
 
-        # Manually lock
-        mutex.acquire()
+    # Retry Delay
+    timer.start()
 
-        # Debugging info
-        print("[I] RECV - Acquired Lock")
+    # Retry Loop
+    while retry and (pkt_buffer or alive):
 
-        # Retry Delay
-        timer.start()
+        bad_seq_or_broken = False
 
-        # Retry Loop
-        while retry:
+        try:
+            # Try ACK Check
+            ack, recvaddr = udt.recv(sock)
+            seq, ack_data = packet.extract(ack)
 
-            bad_seq_or_broken = False
+            with mutex:
 
-            try:
-                # Try ACK Check
-                ack, recvaddr = udt.recv(sock)
-                seq, ack_data = packet.extract(ack)
+                print("\n[I] RECV - Acquired Lock")
 
                 # Check for base packet reception
                 if seq == base:
@@ -240,59 +240,63 @@ def receive_gbn(sock):
                     base += 1
                     pkt_buffer.pop(0)
                     timer.stop()
-                    mutex.release()
-                    time.sleep(SLEEP_INTERVAL)
                     retry = RETRY_ATTEMPTS
-                    break
+                    continue
 
-                bad_seq_or_broken = True
+            bad_seq_or_broken = True
 
-                print("[W] RECV - Got Wrong ACK Seq# {}".format(seq))
+            print("[W] RECV - Got Wrong ACK Seq# {}, Expected {}".format(seq, base))
 
-            except BlockingIOError:
+        except BlockingIOError:
 
-                bad_seq_or_broken = True
+            bad_seq_or_broken = True
 
-            # Otherwise, check timer and restart
-            if timer.timeout() and bad_seq_or_broken:
-                retry -= 1
-                for p in pkt_buffer:
-                    __seq, __unused_data = packet.extract(p)
-                    print("[I] RECV - Sending Packet Seq# {}".format(__seq))
-                    udt.send(p, sock, RECEIVER_ADDR)
-                timer.start()
-
-    # Remove name from hat
-    alive = False
+        # Otherwise, check timer and restart
+        if timer.timeout() and bad_seq_or_broken:
+            retry -= 1
+            timer.start()
 
     # Mutex is held on purpose to ensure
     # Data misordering at fail doesn't occur
 
+    print("[I] RECV - Terminating Thread")
     return
 
+def parse_args():
+    parser = argparse.ArgumentParser(description='Receive UDP packets.')
+    parser.add_argument('method', metavar='<protocol>', type=str,
+                        help='Phrase length(s)')
+    return parser.parse_args()
 
 # Main function
 if __name__ == '__main__':
-    #if len(sys.argv) != 2:
-    #    print('Expected filename as command line argument')
-    #    exit()
 
+    args = parse_args()
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setblocking(0)
     sock.bind(SENDER_ADDR)
 
-    #filename = sys.argv[1]
-    filename = "/home/shor/meta"
+    filename = sys.argv[1]
+    #filename = "/home/shor/meta"
 
     print("pre")
 
     base = 0
 
-    _thread.start_new_thread(send_gbn, (sock,))
-    time.sleep(1)
-    _thread.start_new_thread(receive_gbn, (sock,))
+    if args.method == 'snw':
+        _thread.start_new_thread(send_snw, (sock,))
+        time.sleep(1)
+        _thread.start_new_thread(receive_snw, (sock,))
+    elif args.method == 'gbn':
+        _thread.start_new_thread(send_gbn, (sock,))
+        time.sleep(1)
+        _thread.start_new_thread(receive_gbn, (sock,))
+    else:
+        sys.stderr.write("Protocol selection must be one of [\'snw\', \'gbn\']\n")
+        sys.stderr.flush()
 
+    # problem with alive and sync on recv
     while alive:
         continue
 

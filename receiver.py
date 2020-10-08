@@ -1,8 +1,10 @@
+#!/usr/bin/env python3
 # receiver.py - The receiver in the reliable data transer protocol
 import packet
 import socket
 import sys
 import udt
+import argparse
 
 RECEIVER_ADDR = ('localhost', 8080)
 
@@ -26,7 +28,7 @@ def receive_gbn(sock):
         sys.stderr.flush()
 
         # If data is newer by exactly 1 in-order segment
-        if seq == _seq + 1:
+        if seq == _seq + 1:# or (seq == 0 and _seq != -1):
 
             # Update last sequence
             _seq = seq
@@ -96,17 +98,26 @@ def receive_snw(sock):
         udt.send(b' ', sock, ('localhost', 9090))
 
 
+def parse_args():
+    parser = argparse.ArgumentParser(description='Receive UDP packets.')
+    parser.add_argument('method', metavar='<protocol>', type=str,
+                        help='Phrase length(s)')
+    return parser.parse_args()
 
 # Main function
 if __name__ == '__main__':
-    # if len(sys.argv) != 2:
-    #     print('Expected filename as command line argument')
-    #     exit()
+    args = parse_args()
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.bind(RECEIVER_ADDR)
-    # filename = sys.argv[1]
-    receive_gbn(sock)
+
+    if args.method == 'snw':
+        receive_snw(sock)
+    elif args.method == 'gbn':
+        receiv_gbn(sock)
+    else:
+        sys.stderr.write("Protocol selection must be one of [\'snw\', \'gbn\']\n")
+        sys.stderr.flush()
 
     # Close the socket
     sock.close()
