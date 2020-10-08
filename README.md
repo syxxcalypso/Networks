@@ -1,11 +1,11 @@
 USAGE
 =====
 
-sender usage: ./sender.py [-h] <protocol>
+sender usage: ./sender.py [-h] <protocol> <input file name>
 receiver usage: ./receuver.py [-h] <protocol>
 
 where <protocol> is either 'snw' or 'gbn'
-
+and <input file name> is an OS compliant path name to the file stream
 
 Logging for sender occurs on stdout
 
