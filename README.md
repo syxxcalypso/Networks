@@ -1,7 +1,7 @@
 USAGE
 =====
 
-sender usage: ./sender.py [-h] <protocol> <input file name>
+sender usage: ./sender.py [-h] <input file name> <protocol>
 receiver usage: ./receuver.py [-h] <protocol>
 
 where <protocol> is either 'snw' or 'gbn'
