@@ -4,6 +4,7 @@ import packet
 import socket
 import sys
 import udt
+import time
 import argparse
 
 RECEIVER_ADDR = ('localhost', 8080)
@@ -114,7 +115,7 @@ if __name__ == '__main__':
     if args.method == 'snw':
         receive_snw(sock)
     elif args.method == 'gbn':
-        receiv_gbn(sock)
+        receive_gbn(sock)
     else:
         sys.stderr.write("Protocol selection must be one of [\'snw\', \'gbn\']\n")
         sys.stderr.flush()

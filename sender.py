@@ -14,10 +14,10 @@ from timer import Timer
 PACKET_SIZE = 512
 RECEIVER_ADDR = ('localhost', 8080)
 SENDER_ADDR = ('localhost', 9090)
-SLEEP_INTERVAL = 1.0 # (In seconds)
-TIMEOUT_INTERVAL = 1.0
-WINDOW_SIZE = 4
-RETRY_ATTEMPTS = 24
+SLEEP_INTERVAL = 0.1 # (In seconds)
+TIMEOUT_INTERVAL = 0.2
+WINDOW_SIZE = 8
+RETRY_ATTEMPTS = 6
 
 # SHARED RESOURCES
 base = 0
@@ -29,6 +29,8 @@ timer = Timer(TIMEOUT_INTERVAL)
 # RELAY CONTROL
 sync = False
 alive = True
+sending = True
+receiving = True
 
 # Generate random payload of any length
 def generate_payload(length=10):
@@ -83,7 +85,7 @@ def send_snw(sock):
 # Send using GBN protocol
 def send_gbn(sock):
     # Access to shared resources
-    global sync, data
+    global sync, data, sending, receiving
 
     # Track packet count
     seq = 0
@@ -108,28 +110,25 @@ def send_gbn(sock):
         _base = 0
 
         # Sequential File Access
-        while data or pkt_buffer:
+        while receiving and (data or pkt_buffer):
 
+            # Delay Mutex for sister thread
+            time.sleep(SLEEP_INTERVAL)
 
-            # Bound by window
-            while pkt_buffer:
-                # Delay Mutex for sister thread
-                time.sleep(SLEEP_INTERVAL)
+            with mutex:
 
-                with mutex:
+                sync = True
 
-                    sync = True
-
-                    print("\n[I] SEND - Acquired Lock")
-                    for pkt in pkt_buffer:
-                        print("[I] SEND - Sending Pkt# {}".format(pkt[1]))
-                        udt.send(pkt[0], sock, RECEIVER_ADDR)
+                print("\n[I] SEND - Acquired Lock")
+                for pkt in pkt_buffer:
+                    print("[I] SEND - Sending Pkt# {}".format(pkt[1]))
+                    udt.send(pkt[0], sock, RECEIVER_ADDR)
 
 
             for i in range(base - _base):
                 data = f.read(PACKET_SIZE).encode()
                 if data:
-                    pkt = packet.make(seq, data_)
+                    pkt = packet.make(seq, data)
                     pkt_buffer.append((pkt, seq))
                     seq += 1
             _base = base
@@ -141,7 +140,7 @@ def send_gbn(sock):
         udt.send(pkt, sock, RECEIVER_ADDR)                # Send EOF
 
     print("[I] SEND - Terminating Thread, Buffer Size: {}".format(len(pkt_buffer)))
-    alive = False
+    sending = False
     return
 
 # Receive thread for stop-n-wait
@@ -202,62 +201,55 @@ def receive_snw(sock, pkt):
 def receive_gbn(sock):
 
     # Shared Resource Access
-    global sync, alive, base, data
+    global sync, base, sending, receiving
 
     # Spin lock to synchronize execution
     while not sync:
         continue
 
-    retry = RETRY_ATTEMPTS
+    retry = RETRY_ATTEMPTS + 1
 
     base = 0
 
-    # Retry Delay
-    timer.start()
-
     # Retry Loop
-    while retry and (pkt_buffer or alive):
+    while retry and (pkt_buffer or sending):
+       
+        time.sleep(SLEEP_INTERVAL)
+        with mutex:
 
-        bad_seq_or_broken = False
+            if timer.timeout() or not timer.running():
+                retry -= 1
+                timer.start()
 
-        try:
-            # Try ACK Check
-            ack, recvaddr = udt.recv(sock)
-            seq, ack_data = packet.extract(ack)
+            print("\n[I] RECV - Acquired Lock")
 
-            with mutex:
+            for i in range(WINDOW_SIZE):
 
-                print("\n[I] RECV - Acquired Lock")
+                try:
+                    # Try ACK Check
+                    ack, recvaddr = udt.recv(sock)
+                    seq, ack_data = packet.extract(ack)
 
-                # Check for base packet reception
-                if seq == base:
+                    # Check for base packet reception
+                    if seq == base:
 
-                    print("[I] RECV - Got ACK Seq# {}".format(seq))
+                        print("[I] RECV - Got ACK Seq# {}".format(seq))
 
-                    #sys.stderr.write("ACK on Seq# {}\n".format(seq))
-                    #sys.stderr.flush()
+                        #sys.stderr.write("ACK on Seq# {}\n".format(seq))
+                        #sys.stderr.flush()
 
-                    base += 1
-                    pkt_buffer.pop(0)
-                    timer.stop()
-                    retry = RETRY_ATTEMPTS
+                        base += 1
+                        pkt_buffer.pop(0)
+                        timer.stop()
+                        retry = RETRY_ATTEMPTS + 1
+                        continue
+
+                    print("[W] RECV - Got Wrong ACK Seq# {}, Expected {}".format(seq, base))
+
+                except BlockingIOError:
                     continue
 
-            bad_seq_or_broken = True
-
-            print("[W] RECV - Got Wrong ACK Seq# {}, Expected {}".format(seq, base))
-
-        except BlockingIOError:
-
-            bad_seq_or_broken = True
-
-        # Otherwise, check timer and restart
-        if timer.timeout() and bad_seq_or_broken:
-            retry -= 1
-            timer.start()
-
-    # Mutex is held on purpose to ensure
-    # Data misordering at fail doesn't occur
+    receiving = False
 
     print("[I] RECV - Terminating Thread")
     return
@@ -277,29 +269,34 @@ if __name__ == '__main__':
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setblocking(0)
+    #sock.settimeout(1)
     sock.bind(SENDER_ADDR)
 
     print("pre")
 
     base = 0
 
+    filename = args.path
+
     if args.method == 'snw':
         _thread.start_new_thread(send_snw, (sock,))
         time.sleep(1)
         _thread.start_new_thread(receive_snw, (sock,))
+
+        while alive:
+            pass
+
     elif args.method == 'gbn':
         _thread.start_new_thread(send_gbn, (sock,))
         time.sleep(1)
         _thread.start_new_thread(receive_gbn, (sock,))
+
+        while sending or receiving:
+            pass
+           
     else:
         sys.stderr.write("Protocol selection must be one of [\'snw\', \'gbn\']\n")
         sys.stderr.flush()
-
-    filename = args.path
-
-    # problem with alive and sync on recv
-    while alive:
-        continue
 
     print("post")
     sock.close()
