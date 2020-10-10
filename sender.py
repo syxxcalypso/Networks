@@ -14,8 +14,8 @@ from timer import Timer
 PACKET_SIZE = 512
 RECEIVER_ADDR = ('localhost', 8080)
 SENDER_ADDR = ('localhost', 9090)
-SLEEP_INTERVAL = 0.5 # (In seconds)
-TIMEOUT_INTERVAL = 0.2
+SLEEP_INTERVAL = 0.6 # (In seconds)
+TIMEOUT_INTERVAL = 0.5
 WINDOW_SIZE = 8
 RETRY_ATTEMPTS = 6
 
@@ -127,7 +127,6 @@ def send_gbn(sock):
 
             # Delay Mutex for sister thread
             time.sleep(SLEEP_INTERVAL)
-
             with mutex:
 
                 sync = True
@@ -206,6 +205,8 @@ def receive_snw(sock):
             except BlockingIOError:
                 continue
 
+        time.sleep(SLEEP_INTERVAL)
+
     receiving = False
 
     print("[I] RECV - Terminating Thread")
@@ -229,7 +230,6 @@ def receive_gbn(sock):
     # Retry Loop
     while retry and (pkt_buffer or sending):
        
-        time.sleep(SLEEP_INTERVAL)
         with mutex:
 
             if timer.timeout() or not timer.running():
@@ -264,6 +264,9 @@ def receive_gbn(sock):
                 except BlockingIOError:
                     continue
 
+        time.sleep(SLEEP_INTERVAL)
+
+
     receiving = False
 
     print("[I] RECV - Terminating Thread")
@@ -293,7 +296,14 @@ if __name__ == '__main__':
 
     filename = args.path
 
+
     if args.method == 'snw':
+        WINDOW_SIZE=1
+        _thread.start_new_thread(send_gbn, (sock,))
+        time.sleep(1)
+        _thread.start_new_thread(receive_gbn, (sock,))
+
+    elif args.method == 'snw2':
         _thread.start_new_thread(send_snw, (sock,))
         time.sleep(1)
         _thread.start_new_thread(receive_snw, (sock,))
