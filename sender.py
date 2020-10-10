@@ -74,7 +74,7 @@ def send_snw(sock):
                 sync = True
 
                 print("\n[I] SEND - Acquired Lock")
-                print("[I] SEND - Sending Pkt# {}".format(pkt[1]))
+                print("[I] SEND - Sending Pkt# {}".format(pkt_buffer[0][1]))
                 udt.send(pkt_buffer[0][0], sock, RECEIVER_ADDR)
 
 
